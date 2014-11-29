@@ -52,15 +52,41 @@ class PositionalIndexEntry(object):
 			c.count += c.documents[k].count
 		return c
 
+from utils import DefaultOrderedDict
+class PositionalIndex(DefaultOrderedDict):
+	def __init__(self,factory=PositionalIndexEntry, *args, **kwargs):
+		super(PositionalIndex,self).__init__(factory, *args, **kwargs)
+
+	def insert(self, token):
+		term, doc_id, position = token
+		self[term].append(doc_id,position)
+
+
+	def __add__(self, other):
+		c = PositionalIndex()
+		for k in self.keys() + other.keys():
+			if k in other and k in self:
+				c[k] = self[k] + other[k]
+			elif k in self:
+				c[k] = self[k]
+			else:
+				c[k] = other[k]
+		return c
+
+	def sorted(self):
+		s = PositionalIndex()
+		for k in sorted(self.keys()):
+			s[k] = self[k]
+		return s
 
 
 if __name__ == '__main__':
 	print 'Index construction:'
 	s = [('yellow', 1, 2), ('blue', 2, 1), ('yellow', 1, 3), ('blue', 2, 4), ('red', 1, 2), ('yellow', 2, 1)]
 
-	d = defaultdict(PositionalIndexEntry)
-	for k, v, p in s:
-		d[k].append(v,p)
+	d = PositionalIndex()
+	for t in s:
+		d.insert(t)
 
 	print d.items()
 
@@ -70,6 +96,17 @@ if __name__ == '__main__':
 
 	from pickle import dumps,loads
 	print 'Pickling test:'
+	s= dumps(d)
+	x = loads(s)
+	print x.items()
+	print type(x)
+
+	x = dumps(d)
+	y = loads(x)
+	print y, type(y), type(d)
+
+	d = PositionalIndex(PositionalIndexEntry, y.items())
+	print d.items()
 	e = loads(dumps(d))
 	print e.items()
 	# total_frequency, [(doc_id, doc_freq, positions)]
@@ -79,9 +116,21 @@ if __name__ == '__main__':
 	print 'Summation'
 	d1 = d
 	s2 = [('yellow', 1, 2), ('yellow', 1, 19), ('yellow', 5, 7),('yellow', 5, 3)]
-	d2 = defaultdict(PositionalIndexEntry)
-	for k, v, p in s2:
-		d2[k].append(v,p)
+	d2 = PositionalIndex()
+	for t in s2:
+		d2.insert(t)
 
 	print d1['yellow'], '+', d2['yellow']
 	print (d1['yellow']+d2['yellow'])
+
+	print 'merged index:'
+	for t, x in (d1+d2).items():
+		print '\t', t, x
+
+	print 'merged sorte by key'
+	m = (d1+d2).sorted()
+	for x in m.items():
+		print x
+
+	m2 = loads(dumps(m))
+	print m2
