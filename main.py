@@ -14,7 +14,7 @@ def tokenize(text):
 
 def parse_document(doc_id, text):
 	"""Parse the doc in a stream of term-docId pairs which we call tokens"""
-	return [ (term, doc_id) for term in tokenize(text) ]
+	return [ (term, doc_id, pos) for pos, term in enumerate(tokenize(text)) ]
 
 def generate_token_stream():
 	data_dir = 'data/gutenberg'
@@ -32,6 +32,7 @@ def generate_token_stream():
 	print 'tokens_count', len(token_stream)
 	return token_stream
 
+from positional_index import PositionalIndexEntry
 def SPIMI_Invert(block_id, token_stream):
 	"""
 	Page 73:
@@ -57,18 +58,20 @@ def SPIMI_Invert(block_id, token_stream):
 
 	output_file = BLOCK_NAME_FMT.format(block_id)
 	vocab = defaultdict(lambda: len(vocab))  # maps from term -> term_id
-	index = defaultdict(lambda: set())          # from term_id -> postings list
+	#index = defaultdict(lambda: (0,[]))          # from term_id -> postings list
 
-	for word, doc_id in token_stream:
-		index[vocab[word]].add(doc_id)
+	index = defaultdict(PositionalIndexEntry)
+	for word, doc_id, pos in token_stream:
+		index[vocab[word]].append(doc_id,pos)
 
 	sorted_terms = sorted(vocab.keys())
 	#print 'Block', block_id, [t + ' ' + str(index[vocab[t]]) for t in sorted_terms]
 
-	with open(output_file, 'wt') as f:
-		dump(dict([(t, list(index[vocab[t]])) for t in sorted_terms]), f)
+	with open(output_file, 'wb') as f:
+		dump(dict([(t, index[vocab[t]]) for t in sorted_terms]), f)
+
 	with open(output_file.replace('.dat','.txt'), 'wt') as f:
-		f.write('\n'.join(['%s, %s' % (t, str(list(index[vocab[t]]))) for t in sorted_terms]))
+		f.write('\n'.join(['%s, %s' % (t, str(index[vocab[t]])) for t in sorted_terms]))
 
 	return output_file
 
@@ -95,15 +98,15 @@ def merge(a,b):
 		if k not in a:
 			a[k] = b[k]
 	# Remove duplicates
-	for k in a.keys():
-		a[k] = sorted(list(set(a[k])))
+	# for k in a.keys():
+	# 	a[k] = sorted(list(set(a[k])))
 	return a
 
 def merge_blocks(terms, blocks):
 	output_file = 'index.txt'
 
 	with open(output_file, 'wt') as index:
-		files = [open(b) for b in blocks]
+		files = [ open(b,'rb') for b in blocks ]
 		d = reduce(merge,[ load(f) for f in files ], dict()).items()
 		for term, postings_list in sorted(d, key=lambda x: x[0]):
 		 	index.write('%s, %s\n' % (term, str(postings_list)))
