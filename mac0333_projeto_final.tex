@@ -1,0 +1,329 @@
+\documentclass[a4paper]{article}
+
+\usepackage[english]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage[colorinlistoftodos]{todonotes}
+\usepackage{listings}   
+\usepackage{hyperref}
+\usepackage{underscore}
+
+\title{MAC0333 - Projeto Final: Single-pass in-memory indexing em Python}
+
+\author{Felipe Blassioli}
+
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introdução}
+
+Esse é o projeto final da disciplina \href{https://uspdigital.usp.br/jupiterweb/obterDisciplina?sgldis=mac0333&nomdis=}{MAC0333 - Armazenamento e Recuperação de Informação}. Implementei o algoritmo \href{http://nlp.stanford.edu/IR-book/html/htmledition/single-pass-in-memory-indexing-1.html}{Single pass in-memory Indexing (SPIMI)} descrito no livro \href{http://nlp.stanford.edu/IR-book/}{Introduction to Information Retrieval}.
+
+O código fonte da implementação está disponível no seguinte repositório \url{https://github.com/felipeblassioli/spimi}
+
+\section{Single-pass in-memory indexing}
+
+\subsection{Ordenação Externa}
+
+Algoritmos de ordenação externa são necessários quando o volume de dados a serem ordenados não cabem na memória principal (normalmente a RAM) do dispositivo e devem ser armazenados na memória de massa. No geral consistem numa abordagem híbrida de ordenação e combinação, na qual são ordenados blocos de dados suficientemente pequenos para caber na memória principal disponível para então serem ordenados e armazenados em arquivos temporários que na segunda etapa serão combinados num único grande arquivo. 
+
+\subsection{Pseudo-código}
+
+Segue o pseudo-código presente no livro:
+
+\begin{lstlisting}
+    SPIMI-Invert(token_stream)
+ 1  output_file = NewFile()
+ 2  dictionary = NewHash()
+ 3  while (free memory available)
+ 4  do token <- next(token_stream)
+ 5    if term(token) not in dictionary
+ 6      then postings_list = AddToDictionary(dictionary,term(token))
+ 7      else postings_list = GetPostingsList(dictionary,term(token))
+ 8    if full(postings_list)
+ 9      then postings_list = DoublePostingsList(dictionary,term(token))
+10    AddToPostingsList(postings_list, docID(token))
+11  sorted_terms <- SortTerms(dictionary)
+12  WriteBlockToDisk(sorted_terms,dictionary,output_file)
+13  return output_file
+\end{lstlisting}
+
+No livro foram omitidas duas etapas importantes do algoritmo: a combinação dos blocos e geração da cadeia de tokens.
+
+\section{Implementação}
+
+Foram feitas duas implementações do algoritmo a primeira com índices não-posicionais e a segunda com indíces posicionais. Os trechos nas sessões seguintes são referentes ao índices não-posicionais, pois por serem mais simples o código é mais simples e didático.
+
+\section{Estruturas de Dados}
+
+\subsubsection{Índice não-posicional }
+
+Índices não-posicionais são muito simples e consistem num dicionário cujos valores a postings_list do termo que consiste numa lista ordenado dos docIds no qual o termo aparece.
+
+\subsubsection{Índice posicional}
+
+Para termo no vocabulário são armazenados postings na forma docID: $\langle$position1, position2, ...$\rangle$ onde cada posição é o índice do token no documento. As frequências também são armazenadas para facilitar cálculos como, por exemplo, o peso nos algoritmos de ranqueamento.
+
+A estrutura presente em \href{https://github.com/felipeblassioli/spimi/blob/master/positional_index.py}{positional_index.py} é um DefaultOrderedDict, isto é, um dicionário que relembra a ordem de inserção de seus valores e tem um valor default quando da tentativa de acesso a uma chave inexistente.
+
+A combinação das estruturas é feita por meio dos operadores de adição dos objetos. Veja:
+
+\begin{lstlisting}[language=Python]  % Start your code-block
+
+def __add__(self, other):
+  c = PositionalIndex()
+  for k in self.keys() + other.keys():
+    if k in other and k in self:
+    	c[k] = self[k] + other[k]
+    elif k in self:
+    	c[k] = self[k]
+    else:
+    	c[k] = other[k]
+  return c
+
+\end{lstlisting}
+
+Assim a soma dos índices/dicionários a,b é:
+
+\subsection{Geração da cadeia de Tokens}
+
+A geração das cadeia de tokens é feita por meio da leitura de arquivos texto num diretório especificado. O processo de tokenização implementado é bastante simples e é feito por meio de expressões regulares, de modo que para a entrada "A first-class ticket to the U.S.A. isn't expensive?"
+ temos como saída a lista de tokens ['A', 'first-class', 'ticket', 'to', 'the', 'U.S.A.', "isn't", 'expensive', '?']. Não foi utilizado case-folding ou qualquer topo de normalização ou stemming, mas dada a estrutura do código, seria simples acrescentá-los ao processo.
+ 
+Tokens não-posicionais são pares term-DocID e posicionais são tuplas term-DocId-position.
+ 
+
+\subsection{Ordenação}
+
+A etapa de ordenação foi completamente descrita no pseudo-código presente no livro. Consiste simplesmente no acúmulo de tokens enquanto há memória disponível e na criação de arquivos temporários que armazenam os termos e suas postings_list.
+
+\url{https://raw.githubusercontent.com/felipeblassioli/spimi/b1b1ae42e9cb30371af5ffcded0f94d3d3293cb2/main.py}
+
+\begin{lstlisting}[language=Python]  % Start your code-block
+
+def SPIMI_Invert(block_id, token_stream):
+  output_file = BLOCK_NAME_FMT.format(block_id)
+
+  # Mapas
+  # maps from term -> term_id
+  vocab = defaultdict(lambda: len(vocab))  
+  # from term_id -> postings list
+  index = defaultdict(lambda: set())
+
+  # Acumulo de tokens
+  for word, doc_id in token_stream:
+  index[vocab[word]].add(doc_id)
+
+  # ordenacao
+  sorted_terms = sorted(vocab.keys())
+
+  # Escrita dos arquivos temporarios
+  with open(output_file, 'wt') as f:
+  	dump(dict([(t, list(index[vocab[t]])) for t in sorted_terms]), f)
+  with open(output_file.replace('.dat','.txt'), 'wt') as f:
+  	f.write('\n'.join(['%s, %s' % (t, str(list(index[vocab[t]]))) for t in sorted_terms]))
+
+  return output_file
+\end{lstlisting}
+
+
+\subsection{Combinação}
+
+A combinação de blocos foi feita usando a função built-in da linguagem \href{https://docs.python.org/2/library/functions.html#reduce}{reduce} juntamente com a operação de adição das estruturas de dados nos blocos lidos dos arquivos temporários.
+
+\url{https://github.com/felipeblassioli/spimi/blob/b1b1ae42e9cb30371af5ffcded0f94d3d3293cb2/main.py}
+\begin{lstlisting}[language=Python]  % Start your code-block
+
+def merge_blocks(terms, blocks):
+  output_file = 'index.txt'
+  with open(output_file, 'wt') as index:
+    files = [open(b) for b in blocks]
+    d = reduce(merge,[ load(f) for f in files ], dict()).items()
+    for term, postings_list in sorted(d, key=lambda x: x[0]):
+      index.write('%s, %s\n' % (term, str(postings_list)))
+    for f in files: f.close()
+  print 'generated', output_file
+\end{lstlisting}
+
+Observacoes:
+Do jeito que foi estruturado o codigo eh facil aplicar normalizacoes como case-folding ou mesmo stemming de bibliotecas como: http://www.nltk.org/api/nltk.stem.html
+Como a enfase estava no algoritmo de construcao de indice, e nao no desenvolvimento de um sistema completo de busca, nao fiz muitas experimentacoes.
+
+Geracao da cadeia de tokens, onde token sao pares term-docId e o merge dos blocks. No codigo anexado 
+essas etapas estao presentes em generate_token_stream e merge_blocks.
+
+Uma decisao que tomei na implementacao foi fixar a quantidade de tokens nos blocos para tratar a condicao "free memory available"
+a motivacao disso eh que sabendo a quantidade tokens num bloco eh possivel estimar a quantidade de bytes na memoria.
+Alem disso, ter controle do tamanho dos blocos pode permitir um ajuste de parametro mais eficiente na hora de fazer o merge dos mesmos.
+
+\section{Resultados}
+\subsection{Dados}
+
+Os dados utilizados foram textos de livros disponíveis em \href{https://www.gutenberg.org/}{projeto guthenberg}:
+
+\begin{enumerate}
+\item        austen-emma.txt (867KB)
+\item       austen-persuasion.txt (456KB)
+\item       austen-sense.txt (658KB)
+\item       bible-kjv.txt (4.2MB)
+\item       blake-poems.txt (38KB)
+\item       bryant-stories.txt (244KB)
+\item       burgess-busterbrown.txt (83KB)
+\item       carroll-alice.txt (142KB)
+\item       chesterton-ball.txt (447KB)
+ \item      chesterton-brown.txt (398KB)
+ \item      chesterton-thursday.txt (314KB)
+ \item      edgeworth-parents.txt (914KB)
+ \item      melville-moby_dick.txt (1.2MB)
+ \item     milton-paradise.txt (458KB)
+ \item     shakespeare-caesar.txt (110KB)
+  \item    shakespeare-hamlet.txt (160KB)
+  \item    shakespeare-macbeth.txt (98KB)
+ \item     whitman-leaves.txt (695KB)
+\end{enumerate}
+
+        
+
+\subsection{Índice não-posicional}
+
+\begin{verbatim}
+[zillertal:~/non_positional]$ time python main.py
+Documents Indexed:
+        0 austen-emma.txt
+        1 austen-persuasion.txt
+        2 austen-sense.txt
+        3 bible-kjv.txt
+        4 blake-poems.txt
+        5 bryant-stories.txt
+        6 burgess-busterbrown.txt
+        7 carroll-alice.txt
+        8 chesterton-ball.txt
+        9 chesterton-brown.txt
+        10 chesterton-thursday.txt
+        11 edgeworth-parents.txt
+        12 melville-moby_dick.txt
+        13 milton-paradise.txt
+        14 shakespeare-caesar.txt
+        15 shakespeare-hamlet.txt
+        16 shakespeare-macbeth.txt
+        17 whitman-leaves.txt
+tokens_count 2542421
+block from  0 500000
+block from  500000 1000000
+block from  1000000 1500000
+block from  1500000 2000000
+block from  2000000 2500000
+block from  2500000 2542421
+generated index.txt
+
+real    1m2.192s
+user    0m9.837s
+sys     0m0.324s
+[zillertal:~/non_positional]$ wc index.txt
+  59645  205460 1155461 index.txt
+\end{verbatim}
+
+Segue um trecho do arquivo non_positional.txt que possui ~1MB:
+
+\begin{verbatim}
+yourselves, [1, 2, 3, 5, 6, 8, 9, 10, 11, 12, 13, 17]
+youth, [0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12, 13, 15, 16, 17]
+youth's, [11, 17]
+youth-killing, [1]
+youth-time, [4]
+\end{verbatim}
+
+
+\subsection{Índice posicional}
+
+\begin{verbatim}
+[zillertal:~/MAC0333_SPIMI]$ time python main.py --positional --block_size 500000
+Documents Indexed:
+        0 austen-emma.txt
+        1 austen-persuasion.txt
+        2 austen-sense.txt
+        3 bible-kjv.txt
+        4 blake-poems.txt
+        5 bryant-stories.txt
+        6 burgess-busterbrown.txt
+        7 carroll-alice.txt
+        8 chesterton-ball.txt
+        9 chesterton-brown.txt
+        10 chesterton-thursday.txt
+        11 edgeworth-parents.txt
+        12 melville-moby_dick.txt
+        13 milton-paradise.txt
+        14 shakespeare-caesar.txt
+        15 shakespeare-hamlet.txt
+        16 shakespeare-macbeth.txt
+        17 whitman-leaves.txt
+tokens_count 2542421
+block from  0 500000
+block from  500000 1000000
+block from  1000000 1500000
+block from  1500000 2000000
+block from  2000000 2500000
+block from  2500000 2542421
+generated index.txt
+
+real    2m35.565s
+user    1m23.621s
+sys     0m0.824s
+[zillertal:~/MAC0333_SPIMI]$ wc index.txt
+   59645  2953341 21297891 index.txt
+[zillertal:~/MAC0333_SPIMI]$
+\end{verbatim}
+
+Segue um trecho do arquivo positional.txt que possui ~20MB:
+
+\begin{verbatim}
+whoop, 1, [(8, 1, [37301])]
+whooping, 2, [(10, 1, [65613]), (12, 1, [87569])]
+whor'd, 1, [(15, 1, [32927])]
+whore, 14, [(3, 14, [107671, 109133, 109210, 179186, 180044, 180070, 234131, 533626, 588125, 663225, 971610, 972099, 972131, 973195])]
+whore's, 1, [(3, 1, [596840])]
+\end{verbatim}
+
+\section{Problemas}
+
+Esta implementação certamente não está em nível de produção pelos seguinte motivos:
+
+\begin{enumerate}
+\item Não tomei nenhum cuidado de otimização ao utilizar apenas as funções built-in da linguagem.
+Assim sendo, penso que várias operações como as de  intersecção e ordenação possivelmente podem ser feitas de modo mais eficiente.
+\item Na etapa de combinação a função lê os dicionários de todos os blocos na memória principal. Isso precisa ser corrigido, mas não consegui fazer a combinação por partes sem comprometer sua complexidade linear.
+\end{enumerate}
+
+\section{Apêndice: Arquivos entregues}
+
+\begin{itemize}
+\item positional: Diretório contendo a implementação usando índices posicionais.
+\item non_positional: Diretório  contendo a implementação usando índices não-posicionais.
+\item data: Diretório contendo os arquivos de texto para geração dos índices.
+
+\subsection{Execução}
+
+\end{itemize}
+
+É necessário ter o python 2.7 instalado. 
+
+Para gerar o indíce não-posicional faça:
+
+\begin{lstlisting}
+$ cp -r data non_positional/
+$ cd non_positional
+$ python main.py
+\end{lstlisting}
+
+Para gerar o indíce posicional faça:
+
+\begin{lstlisting}
+$ cp -r data positional/
+$ cd positional
+$ python main.py --positional
+\end{lstlisting}
+
+\end{document}
